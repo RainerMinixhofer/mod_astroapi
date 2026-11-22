@@ -1,0 +1,20 @@
+[Unit]
+Description=AstroAPI Inbox change watcher
+After=network.target
+Requires=astroapi.service
+
+[Service]
+Type=simple
+User=rainer
+Group=www-data
+WorkingDirectory=/var/www/joomla/modules/mod_astroapi/backend
+ExecStart=/var/www/joomla/modules/mod_astroapi/venv/bin/python inbox_watchdog.py
+Restart=always
+RestartSec=10
+Environment=ASTROAPI_QUIET_SECONDS=60
+Environment=ASTROAPI_VERIFY_SECONDS=5
+Environment=ASTROAPI_POLL_SECONDS=2
+EnvironmentFile=-/etc/astroapi-phoca-sync.env
+
+[Install]
+WantedBy=multi-user.target

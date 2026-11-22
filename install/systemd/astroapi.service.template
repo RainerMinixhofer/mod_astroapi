@@ -1,0 +1,16 @@
+[Unit]
+Description=AstroAPI backend
+After=network.target mysql.service mariadb.service
+
+[Service]
+Type=simple
+User=__SERVICE_USER__
+Group=__WEB_GROUP__
+WorkingDirectory=__JOOMLA_ROOT__/modules/mod_astroapi/backend
+ExecStart=__JOOMLA_ROOT__/modules/mod_astroapi/venv/bin/python -m uvicorn api:app --host 127.0.0.1 --port __API_PORT__
+EnvironmentFile=__ENV_FILE__
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

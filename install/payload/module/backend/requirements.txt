@@ -1,0 +1,32 @@
+# FastAPI and web
+fastapi==0.109.0
+uvicorn[standard]==0.27.0
+python-multipart==0.0.6
+
+# Database
+sqlalchemy==2.0.25
+alembic==1.13.1
+
+# Data validation
+pydantic==2.5.3
+pydantic-settings==2.1.0
+
+# Astronomy
+astropy==6.0.0
+astroplan==0.10.1
+jplephem==2.22
+telescopius-api==1.0.0
+
+# HTTP client
+httpx==0.26.0
+
+# Image processing
+Pillow>=10.0.0
+
+# Utilities
+python-dotenv==1.0.0
+
+# SSL certificate generation
+cryptography>=42.0.0
+
+pyinstaller

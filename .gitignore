@@ -1,0 +1,8 @@
+.env
+.env.*
+*.local
+*.secret
+.status/
+venv/
+__pycache__/
+*.pyc

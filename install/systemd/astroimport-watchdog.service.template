@@ -1,0 +1,18 @@
+[Unit]
+Description=AstroAPI Inbox watchdog
+After=network.target astroapi.service
+Requires=astroapi.service
+
+[Service]
+Type=simple
+User=__SERVICE_USER__
+Group=__WEB_GROUP__
+WorkingDirectory=__JOOMLA_ROOT__/modules/mod_astroapi/backend
+ExecStart=__JOOMLA_ROOT__/modules/mod_astroapi/venv/bin/python inbox_watchdog.py
+EnvironmentFile=__ENV_FILE__
+EnvironmentFile=__SYNC_ENV_FILE__
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

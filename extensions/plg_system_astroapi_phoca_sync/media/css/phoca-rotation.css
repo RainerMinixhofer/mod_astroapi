@@ -1,0 +1,243 @@
+.com_phocagallery,
+html:has(body.com_phocagallery),
+body.com_phocagallery,
+.com_phocagallery .site-grid,
+.com_phocagallery .container-component,
+#phocagallery {
+  background-color: #000;
+  color: #fff;
+}
+
+html:has(#phocagallery),
+body:has(#phocagallery),
+body:has(#phocagallery) .wrapper-static,
+body:has(#phocagallery) .site-grid,
+body:has(#phocagallery) .container-component {
+  background: #000 !important;
+}
+
+body:has(#phocagallery) {
+  margin: 0;
+}
+
+body.com_phocagallery,
+body.com_phocagallery .wrapper-static,
+body.com_phocagallery .site-grid,
+body.com_phocagallery .container-component,
+#phocagallery {
+  min-height: 100vh;
+}
+
+body.com_phocagallery .site-grid,
+body.com_phocagallery .container-component,
+#phocagallery {
+  border: 0;
+  box-shadow: none;
+}
+
+#phocagallery .form-select,
+#phocagallery + form .form-select,
+form:has(.form-select) .form-select {
+  appearance: none !important;
+  background: #000 url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 16 16'%3E%3Cpath fill='white' d='m2 5 6 6 6-6z'/%3E%3C/svg%3E") no-repeat right 0.65rem center / 14px 14px !important;
+  background-color: #000 !important;
+  border-color: #555;
+  color: #fff !important;
+  color-scheme: dark;
+}
+
+#phocagallery .form-select option,
+#phocagallery + form .form-select option,
+form:has(.form-select) .form-select option {
+  background-color: #000 !important;
+  color: #fff !important;
+}
+
+#phocagallery .pg-item-box:has(.ph-si-back-medium),
+#phocagallery .pg-item-box:has(.ph-si-back-medium) .pg-item-box-image {
+  background: #000 !important;
+  border-color: #333;
+}
+
+.ph-si-back-medium {
+  color: #fff;
+  fill: #777 !important;
+  background: #000 !important;
+}
+
+#phocagallery .pg-category-box,
+#phocagallery .pg-item-box {
+  background: #080808;
+}
+
+.pswp__button--astro-rotate-left,
+.pswp__button--astro-rotate-right {
+  background: rgba(0, 0, 0, 0.35);
+  color: #fff;
+  font-family: Arial, sans-serif;
+  font-size: 26px;
+  line-height: 44px;
+  text-align: center;
+}
+
+.pswp__button--astro-rotate-left::before {
+  content: "↶";
+}
+
+.pswp__button--astro-rotate-right::before {
+  content: "↷";
+}
+
+.pswp__img[data-astro-rotation] {
+  transition: rotate 180ms ease, scale 180ms ease;
+}
+
+.astro-phoca-home {
+  background: #18233a;
+  border-radius: 6px;
+  color: #fff;
+  display: inline-block;
+  font-weight: 600;
+  margin: 0 0 18px;
+  padding: 9px 14px;
+  text-decoration: none;
+}
+
+.astro-phoca-home:hover,
+.astro-phoca-home:focus {
+  background: #2b3d63;
+  color: #fff;
+}
+
+.astro-category-total {
+  color: #fff;
+  font-weight: 800;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9);
+  white-space: nowrap;
+}
+
+.astro-import-status {
+  align-items: center;
+  background: rgba(24, 35, 58, 0.92);
+  border-radius: 6px;
+  color: #fff;
+  display: flex;
+  gap: 8px;
+  margin: -4px 0 18px;
+  padding: 9px 14px;
+}
+
+.astro-import-status__dot {
+  background: #9ca3af;
+  border-radius: 50%;
+  display: inline-block;
+  height: 10px;
+  width: 10px;
+}
+
+.astro-classification-filter {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  margin: -4px 0 18px;
+}
+
+.astro-classification-filter label {
+  color: #fff;
+  font-weight: 600;
+}
+
+.astro-classification-filter select {
+  max-width: 360px;
+  width: auto;
+}
+
+.astro-import-status[data-phase="idle"] .astro-import-status__dot {
+  background: #4ade80;
+}
+
+.astro-import-status[data-phase="uploading"] .astro-import-status__dot,
+.astro-import-status[data-phase="waiting"] .astro-import-status__dot,
+.astro-import-status[data-phase="verifying"] .astro-import-status__dot,
+.astro-import-status[data-phase="importing"] .astro-import-status__dot,
+.astro-import-status[data-phase="syncing_phoca"] .astro-import-status__dot {
+  animation: astro-import-pulse 1.2s infinite;
+  background: #60a5fa;
+}
+
+.astro-import-status[data-phase="error"] .astro-import-status__dot,
+.astro-import-status[data-phase="sync_error"] .astro-import-status__dot,
+.astro-import-status[data-phase="unavailable"] .astro-import-status__dot {
+  background: #ef4444;
+}
+
+.pswp__caption {
+  bottom: 18px;
+  left: 50%;
+  max-height: min(38vh, 420px);
+  max-width: min(900px, calc(100vw - 120px));
+  overflow: auto;
+  pointer-events: auto;
+  top: auto;
+  transform: translateX(-50%);
+  width: max-content;
+  z-index: 20;
+}
+
+.pswp__caption__center {
+  background: rgba(0, 0, 0, 0.48);
+  border-radius: 6px;
+  color: #f8fafc;
+  font-size: 14px;
+  line-height: 1.4;
+  margin: 0;
+  max-width: 100%;
+  padding: 12px 16px;
+}
+
+.pswp__caption__center p {
+  margin: 0 0 8px;
+}
+
+.pswp__caption__center p:last-child,
+.pswp__caption__center ul:last-child {
+  margin-bottom: 0;
+}
+
+.pswp__caption__center a {
+  color: #93c5fd;
+  text-decoration: underline;
+}
+
+.astro-observation-video {
+  background: #000;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 4px;
+  display: block;
+  height: auto;
+  max-height: 45vh;
+  max-width: 100%;
+  width: 720px;
+}
+
+.pswp__caption--fake {
+  display: none !important;
+}
+
+@media (max-width: 767px) {
+  .pswp__caption {
+    bottom: 10px;
+    left: 12px;
+    max-height: 34vh;
+    max-width: calc(100vw - 24px);
+    top: auto;
+    transform: none;
+  }
+}
+
+@keyframes astro-import-pulse {
+  50% {
+    opacity: 0.35;
+    transform: scale(0.75);
+  }
+}
