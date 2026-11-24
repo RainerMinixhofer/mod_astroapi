@@ -19,7 +19,7 @@ final class AstroapiPhocaSync extends CMSPlugin implements SubscriberInterface
 {
     use DatabaseAwareTrait;
     private const OPENNGC_URL = 'https://raw.githubusercontent.com/mattiaverga/OpenNGC/refs/heads/master/database_files/NGC.csv';
-    /** @var array<string, string>|null */
+    /** @var array<string, array{type: string, hubble: string}>|null */
     private ?array $openNgcTypeCache = null;
 
     public static function getSubscribedEvents(): array
@@ -444,6 +444,25 @@ final class AstroapiPhocaSync extends CMSPlugin implements SubscriberInterface
             ];
         }
 
+        $structuredCategory = $this->structuredCategory(
+            implode(' ', array_filter([$objectClass, $targetType]))
+        );
+        $coarse = preg_match(
+            '/^(?:galaxy|nebula|cluster|galax|nebul)$/i',
+            trim((string) ($observation['target_type'] ?? $observation['object_class'] ?? ''))
+        ) === 1;
+
+        if ($structuredCategory !== null && !$coarse) {
+            return [
+                'category' => $structuredCategory['category'],
+                'tags' => array_values(array_unique([
+                    ...$tags,
+                    ...$structuredCategory['tags'],
+                    'Classification_Structured',
+                ])),
+            ];
+        }
+
         $openNgcType = $this->resolveOpenNgcClassification($catalogId);
         if ($openNgcType !== null) {
             $openNgcCategory = $this->structuredCategory($openNgcType);
@@ -459,14 +478,7 @@ final class AstroapiPhocaSync extends CMSPlugin implements SubscriberInterface
             }
         }
 
-        $structuredCategory = $this->structuredCategory(
-            implode(' ', array_filter([$objectClass, $targetType]))
-        );
         if ($structuredCategory !== null) {
-            $coarse = preg_match(
-                '/^(?:galaxy|nebula|cluster|galax|nebul)$/i',
-                trim((string) ($observation['target_type'] ?? $observation['object_class'] ?? ''))
-            ) === 1;
             return [
                 'category' => $structuredCategory['category'],
                 'tags' => array_values(array_unique([
@@ -636,9 +648,22 @@ final class AstroapiPhocaSync extends CMSPlugin implements SubscriberInterface
         }
 
         $types = $this->openNgcTypes();
-        $rawType = strtoupper(trim((string) ($types[$catalogId] ?? '')));
+        $entry = $types[$catalogId] ?? null;
+        if (!is_array($entry)) {
+            return null;
+        }
+
+        $rawType = strtoupper(trim((string) ($entry['type'] ?? '')));
+        $hubble = strtoupper(trim((string) ($entry['hubble'] ?? '')));
         if ($rawType === '') {
             return null;
+        }
+
+        if ($rawType === 'G') {
+            $galaxySubtype = $this->classifyGalaxyFromHubble($hubble);
+            if ($galaxySubtype !== null) {
+                return $galaxySubtype;
+            }
         }
 
         $typeMap = [
@@ -699,7 +724,7 @@ final class AstroapiPhocaSync extends CMSPlugin implements SubscriberInterface
     }
 
     /**
-     * @return array<string, string>
+     * @return array<string, array{type: string, hubble: string}>
      */
     private function openNgcTypes(): array
     {
@@ -737,13 +762,14 @@ final class AstroapiPhocaSync extends CMSPlugin implements SubscriberInterface
 
                 $name = strtoupper(trim((string) ($row['Name'] ?? '')));
                 $type = strtoupper(trim((string) ($row['Type'] ?? '')));
+                $hubble = strtoupper(trim((string) ($row['Hubble'] ?? '')));
                 if ($name !== '' && $type !== '') {
-                    $types[$name] = $type;
+                    $types[$name] = ['type' => $type, 'hubble' => $hubble];
                 }
 
                 $messier = ltrim(trim((string) ($row['M'] ?? '')), '0');
                 if ($messier !== '' && $type !== '') {
-                    $types['M' . $messier] = $type;
+                    $types['M' . $messier] = ['type' => $type, 'hubble' => $hubble];
                 }
             }
 
@@ -758,6 +784,30 @@ final class AstroapiPhocaSync extends CMSPlugin implements SubscriberInterface
             $this->openNgcTypeCache = [];
             return $this->openNgcTypeCache;
         }
+    }
+
+    private function classifyGalaxyFromHubble(string $hubble): ?string
+    {
+        $value = strtoupper(preg_replace('/\s+/', '', $hubble) ?? '');
+        if ($value === '') {
+            return null;
+        }
+
+        if (
+            preg_match('/^E[0-9.+-]*$/', $value) === 1
+            || str_starts_with($value, 'S0')
+            || str_contains($value, 'LENT')
+        ) {
+            return 'Elliptical Galaxy';
+        }
+        if (str_contains($value, 'IRR') || str_starts_with($value, 'IM')) {
+            return 'Irregular Galaxy';
+        }
+        if (preg_match('/^(?:S|SA|SAB|SB)/', $value) === 1) {
+            return 'Spiral Galaxy';
+        }
+
+        return null;
     }
 
     /**

@@ -162,12 +162,13 @@ def load_openngc_type_cache():
         for row in reader:
             name = str(row.get("Name") or "").strip().upper()
             object_type = str(row.get("Type") or "").strip().upper()
+            hubble = str(row.get("Hubble") or "").strip().upper()
             if name and object_type:
-                cache[name] = object_type
+                cache[name] = {"type": object_type, "hubble": hubble}
 
             messier = str(row.get("M") or "").strip().lstrip("0")
             if messier and object_type:
-                cache[f"M{messier}"] = object_type
+                cache[f"M{messier}"] = {"type": object_type, "hubble": hubble}
     except (csv.Error, KeyError):
         cache = {}
 
@@ -181,9 +182,18 @@ def resolve_openngc_type(target_name):
         return None
 
     cache = load_openngc_type_cache()
-    raw_type = cache.get(normalized.upper())
+    record = cache.get(normalized.upper())
+    if not isinstance(record, dict):
+        return None
+    raw_type = str(record.get("type") or "").strip().upper()
+    hubble = str(record.get("hubble") or "").strip().upper()
     if not raw_type:
         return None
+
+    if raw_type == "G":
+        subtype = classify_galaxy_from_hubble(hubble)
+        if subtype:
+            return subtype
 
     mapped = OPENNGC_TYPE_MAP.get(raw_type)
     if mapped:
@@ -211,6 +221,19 @@ def resolve_openngc_type(target_name):
     if raw_type.startswith("G"):
         return "Galaxy"
 
+    return None
+
+
+def classify_galaxy_from_hubble(hubble):
+    value = re.sub(r"\s+", "", str(hubble or "").upper())
+    if not value:
+        return None
+    if re.match(r"^E[0-9.+-]*$", value) or value.startswith("S0") or "LENT" in value:
+        return "Elliptical Galaxy"
+    if "IRR" in value or value.startswith("IM"):
+        return "Irregular Galaxy"
+    if re.match(r"^(S|SA|SAB|SB)", value):
+        return "Spiral Galaxy"
     return None
 
 
