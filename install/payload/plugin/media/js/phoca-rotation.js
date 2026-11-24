@@ -2,6 +2,8 @@
   'use strict';
 
   const buttonClass = 'pswp__button--astro-rotate';
+  const captionToggleClass = 'pswp__button--astro-caption-toggle';
+  const captionHiddenClass = 'astro-caption-hidden';
   const rotationAttribute = 'data-astro-rotation';
   const fullscreenRoute = '/index.php/observatory/astronomy-observations';
   const options = window.Joomla?.getOptions?.('astroapiPhoca') || {};
@@ -130,6 +132,10 @@
       if (badge.textContent !== badgeText) {
         badge.textContent = badgeText;
       }
+
+      box.querySelectorAll('a[href*="tagid="]').forEach((tagLink) => {
+        tagLink.classList.add('astro-tile-classification-hidden');
+      });
     });
   };
 
@@ -273,14 +279,52 @@
     container.appendChild(button);
   };
 
-  const installControls = () => {
-    const topBar = document.querySelector('.pswp__top-bar');
-    if (!topBar || topBar.querySelector(`.${buttonClass}`)) {
+  const updateCaptionToggleButton = () => {
+    const photoswipe = document.querySelector('.pswp');
+    const button = document.querySelector(`.${captionToggleClass}`);
+    if (!button) {
       return;
     }
 
+    const isHidden = photoswipe?.classList.contains(captionHiddenClass) || false;
+    const title = isHidden ? 'Show details overlay' : 'Hide details overlay';
+    button.setAttribute('aria-label', title);
+    button.setAttribute('aria-pressed', isHidden ? 'true' : 'false');
+    button.title = title;
+  };
+
+  const toggleCaptionOverlay = () => {
+    const photoswipe = document.querySelector('.pswp');
+    if (!photoswipe) {
+      return;
+    }
+
+    photoswipe.classList.toggle(captionHiddenClass);
+    updateCaptionToggleButton();
+    refitActiveImage();
+  };
+
+  const installControls = () => {
+    const topBar = document.querySelector('.pswp__top-bar');
+    if (!topBar || topBar.querySelector(`.${buttonClass}`) || topBar.querySelector(`.${captionToggleClass}`)) {
+      return;
+    }
+    const photoswipe = topBar.closest('.pswp');
+    photoswipe?.classList.add(captionHiddenClass);
+
     addButton(topBar, -1, 'Rotate 90 degrees left');
     addButton(topBar, 1, 'Rotate 90 degrees right');
+
+    const captionButton = document.createElement('button');
+    captionButton.type = 'button';
+    captionButton.className = `pswp__button ${captionToggleClass}`;
+    captionButton.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      toggleCaptionOverlay();
+    });
+    topBar.appendChild(captionButton);
+    updateCaptionToggleButton();
   };
 
   const resetInactiveSlides = () => {
@@ -298,6 +342,7 @@
     preserveFullscreenNavigation();
     decorateGallery();
     installControls();
+    updateCaptionToggleButton();
   });
 
   observer.observe(document.documentElement, {

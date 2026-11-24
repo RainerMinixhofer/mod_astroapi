@@ -6,6 +6,8 @@ import struct
 import urllib.error
 import urllib.parse
 import urllib.request
+import csv
+import io
 from PIL import Image
 from config import database_config, inbox_path
 
@@ -28,12 +30,13 @@ CALDWELL_ALIASES = {
 
 OBJECT_ALIASES = {
     "IC405": "Emission Nebula",
+    "IC1805": "Emission Nebula",
     "IC360": "Emission Nebula",
     "IC1995": "Reflection Nebula",
     "IC1396B": "Emission Nebula",
     "IC353": "Emission Nebula",
     "IC5070": "Emission Nebula",
-    "NGC7000": "Nebula",
+    "NGC7000": "Emission Nebula",
     "NGC1499": "Emission Nebula",
     "NGC6992": "Supernova Remnant",
     "NGC6995": "Supernova Remnant",
@@ -112,6 +115,103 @@ OBJECT_TYPE_REFINEMENTS = {
     "SH2103": "Supernova Remnant",
     "NGC6960": "Supernova Remnant",
 }
+
+OPENNGC_URL = "https://raw.githubusercontent.com/mattiaverga/OpenNGC/refs/heads/master/database_files/NGC.csv"
+OPENNGC_TIMEOUT_SECONDS = 8
+OPENNGC_TYPE_CACHE = None
+
+OPENNGC_TYPE_MAP = {
+    "G": "Galaxy",
+    "GPAIR": "Galaxy",
+    "GTRPL": "Galaxy",
+    "GGROUP": "Galaxy",
+    "OCL": "Open Cluster",
+    "GCL": "Globular Cluster",
+    "*": "Starfield",
+    "**": "Starfield",
+    "*ASS": "Starfield",
+    "HII": "Emission Nebula",
+    "SNR": "Supernova Remnant",
+    "PN": "Planetary Nebula",
+    "RFN": "Reflection Nebula",
+    "NEB": "Nebula",
+    "EMN": "Emission Nebula",
+    "CL+N": "Emission Nebula",  # Open cluster with nebulosity (e.g. IC 1805)
+}
+
+
+def load_openngc_type_cache():
+    global OPENNGC_TYPE_CACHE
+    if OPENNGC_TYPE_CACHE is not None:
+        return OPENNGC_TYPE_CACHE
+
+    try:
+        request = urllib.request.Request(
+            OPENNGC_URL,
+            headers={"User-Agent": "AstroAPI/1.0 OpenNGC resolver"},
+        )
+        with urllib.request.urlopen(request, timeout=OPENNGC_TIMEOUT_SECONDS) as response:
+            content = response.read().decode("utf-8", errors="replace")
+    except (urllib.error.URLError, TimeoutError):
+        OPENNGC_TYPE_CACHE = {}
+        return OPENNGC_TYPE_CACHE
+
+    cache = {}
+    try:
+        reader = csv.DictReader(io.StringIO(content), delimiter=";")
+        for row in reader:
+            name = str(row.get("Name") or "").strip().upper()
+            object_type = str(row.get("Type") or "").strip().upper()
+            if name and object_type:
+                cache[name] = object_type
+
+            messier = str(row.get("M") or "").strip().lstrip("0")
+            if messier and object_type:
+                cache[f"M{messier}"] = object_type
+    except (csv.Error, KeyError):
+        cache = {}
+
+    OPENNGC_TYPE_CACHE = cache
+    return OPENNGC_TYPE_CACHE
+
+
+def resolve_openngc_type(target_name):
+    normalized = catalog_identifier(target_name)
+    if not normalized:
+        return None
+
+    cache = load_openngc_type_cache()
+    raw_type = cache.get(normalized.upper())
+    if not raw_type:
+        return None
+
+    mapped = OPENNGC_TYPE_MAP.get(raw_type)
+    if mapped:
+        return mapped
+
+    # Some OpenNGC composite markers contain "+N" / "HII" etc.
+    if "HII" in raw_type or raw_type.endswith("+N"):
+        return "Emission Nebula"
+    if "PN" in raw_type:
+        return "Planetary Nebula"
+    if "RFN" in raw_type or "RN" in raw_type:
+        return "Reflection Nebula"
+    if "DN" in raw_type:
+        return "Dark Nebula"
+    if "SNR" in raw_type:
+        return "Supernova Remnant"
+    if raw_type.startswith("N") or "NEB" in raw_type:
+        return "Nebula"
+    if "GCL" in raw_type:
+        return "Globular Cluster"
+    if "OCL" in raw_type or "CL*" in raw_type:
+        return "Open Cluster"
+    if raw_type in {"*", "**", "*ASS"}:
+        return "Starfield"
+    if raw_type.startswith("G"):
+        return "Galaxy"
+
+    return None
 
 
 def catalog_identifier(target_name):
@@ -206,6 +306,10 @@ def resolve_catalog_type(target_name):
     refined = OBJECT_TYPE_REFINEMENTS.get(original_key)
     if refined:
         return refined
+
+    openngc_type = resolve_openngc_type(original_target)
+    if openngc_type:
+        return openngc_type
 
     match = None
     query_names = list(dict.fromkeys([original_target, query_name]))

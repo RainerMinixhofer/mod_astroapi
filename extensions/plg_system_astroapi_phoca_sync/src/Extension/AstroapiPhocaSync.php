@@ -18,6 +18,9 @@ use Joomla\CMS\Uri\Uri;
 final class AstroapiPhocaSync extends CMSPlugin implements SubscriberInterface
 {
     use DatabaseAwareTrait;
+    private const OPENNGC_URL = 'https://raw.githubusercontent.com/mattiaverga/OpenNGC/refs/heads/master/database_files/NGC.csv';
+    /** @var array<string, string>|null */
+    private ?array $openNgcTypeCache = null;
 
     public static function getSubscribedEvents(): array
     {
@@ -308,10 +311,12 @@ final class AstroapiPhocaSync extends CMSPlugin implements SubscriberInterface
             $filename = $existingId > 0
                 ? $this->imageFilename($existingId)
                 : $this->downloadStack($observation);
-            $archivedLinks = $this->archiveObservationFiles(
-                $observation,
-                !$includeUploaded
-            );
+            $archivedLinks = ($includeUploaded && $existingId > 0)
+                ? []
+                : $this->archiveObservationFiles(
+                    $observation,
+                    !$includeUploaded
+                );
             $observation['media_links'] = $archivedLinks
                 + $this->existingMediaLinks($existingId);
             $observation['video_relative'] = $this->selectVideoRelative(
@@ -373,6 +378,11 @@ final class AstroapiPhocaSync extends CMSPlugin implements SubscriberInterface
         $telescope = strtolower((string) ($observation['telescope'] ?? ''));
         $camera = strtolower((string) ($observation['camera'] ?? ''));
         $target = strtolower(trim((string) ($observation['target_name'] ?? '')));
+        $catalogId = strtoupper(preg_replace('/\s+/', '', (string) (
+            $observation['simbad_oid']
+            ?? $observation['target_name']
+            ?? ''
+        )));
         $targetType = strtolower((string) ($observation['target_type'] ?? ''));
         $objectClass = strtolower((string) ($observation['object_class'] ?? ''));
         $source = strtolower((string) ($observation['source'] ?? ''));
@@ -432,6 +442,21 @@ final class AstroapiPhocaSync extends CMSPlugin implements SubscriberInterface
                 'category' => ['Astronomy Society (StAV)', 'Member Observations', $year ?? 'Archive'],
                 'tags' => array_values(array_unique($tags)),
             ];
+        }
+
+        $openNgcType = $this->resolveOpenNgcClassification($catalogId);
+        if ($openNgcType !== null) {
+            $openNgcCategory = $this->structuredCategory($openNgcType);
+            if ($openNgcCategory !== null) {
+                return [
+                    'category' => $openNgcCategory['category'],
+                    'tags' => array_values(array_unique([
+                        ...$tags,
+                        ...$openNgcCategory['tags'],
+                        'Classification_Structured',
+                    ])),
+                ];
+            }
         }
 
         $structuredCategory = $this->structuredCategory(
@@ -602,6 +627,137 @@ final class AstroapiPhocaSync extends CMSPlugin implements SubscriberInterface
         }
 
         return null;
+    }
+
+    private function resolveOpenNgcClassification(string $catalogId): ?string
+    {
+        if ($catalogId === '' || !preg_match('/^(?:NGC|IC|M)\d+$/', $catalogId)) {
+            return null;
+        }
+
+        $types = $this->openNgcTypes();
+        $rawType = strtoupper(trim((string) ($types[$catalogId] ?? '')));
+        if ($rawType === '') {
+            return null;
+        }
+
+        $typeMap = [
+            'G' => 'Galaxy',
+            'GPAIR' => 'Galaxy',
+            'GTRPL' => 'Galaxy',
+            'GGROUP' => 'Galaxy',
+            'OCL' => 'Open Cluster',
+            'GCL' => 'Globular Cluster',
+            '*' => 'Starfield',
+            '**' => 'Starfield',
+            '*ASS' => 'Starfield',
+            'HII' => 'Emission Nebula',
+            'SNR' => 'Supernova Remnant',
+            'PN' => 'Planetary Nebula',
+            'RFN' => 'Reflection Nebula',
+            'NEB' => 'Nebula',
+            'EMN' => 'Emission Nebula',
+            'CL+N' => 'Emission Nebula',
+        ];
+
+        if (isset($typeMap[$rawType])) {
+            return $typeMap[$rawType];
+        }
+
+        if (str_contains($rawType, 'HII') || str_ends_with($rawType, '+N')) {
+            return 'Emission Nebula';
+        }
+        if (str_contains($rawType, 'PN')) {
+            return 'Planetary Nebula';
+        }
+        if (str_contains($rawType, 'RFN') || str_contains($rawType, 'RN')) {
+            return 'Reflection Nebula';
+        }
+        if (str_contains($rawType, 'DN')) {
+            return 'Dark Nebula';
+        }
+        if (str_contains($rawType, 'SNR')) {
+            return 'Supernova Remnant';
+        }
+        if (str_starts_with($rawType, 'N') || str_contains($rawType, 'NEB')) {
+            return 'Nebula';
+        }
+        if (str_contains($rawType, 'GCL')) {
+            return 'Globular Cluster';
+        }
+        if (str_contains($rawType, 'OCL') || str_contains($rawType, 'CL*')) {
+            return 'Open Cluster';
+        }
+        if (in_array($rawType, ['*', '**', '*ASS'], true)) {
+            return 'Starfield';
+        }
+        if (str_starts_with($rawType, 'G')) {
+            return 'Galaxy';
+        }
+
+        return null;
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    private function openNgcTypes(): array
+    {
+        if ($this->openNgcTypeCache !== null) {
+            return $this->openNgcTypeCache;
+        }
+
+        try {
+            $response = HttpFactory::getHttp()->get(self::OPENNGC_URL, [], 20);
+            if ((int) $response->code !== 200) {
+                $this->openNgcTypeCache = [];
+                return $this->openNgcTypeCache;
+            }
+
+            $lines = preg_split('/\r\n|\n|\r/', (string) $response->body) ?: [];
+            $types = [];
+            $header = null;
+            foreach ($lines as $line) {
+                if ($line === '') {
+                    continue;
+                }
+                $fields = str_getcsv($line, ';');
+                if ($header === null) {
+                    $header = $fields;
+                    continue;
+                }
+                if (!is_array($header) || count($fields) !== count($header)) {
+                    continue;
+                }
+
+                $row = array_combine($header, $fields);
+                if (!is_array($row)) {
+                    continue;
+                }
+
+                $name = strtoupper(trim((string) ($row['Name'] ?? '')));
+                $type = strtoupper(trim((string) ($row['Type'] ?? '')));
+                if ($name !== '' && $type !== '') {
+                    $types[$name] = $type;
+                }
+
+                $messier = ltrim(trim((string) ($row['M'] ?? '')), '0');
+                if ($messier !== '' && $type !== '') {
+                    $types['M' . $messier] = $type;
+                }
+            }
+
+            $this->openNgcTypeCache = $types;
+            return $this->openNgcTypeCache;
+        } catch (\Throwable $exception) {
+            Log::add(
+                'OpenNGC type lookup unavailable: ' . $exception->getMessage(),
+                Log::WARNING,
+                'astroapi.phoca'
+            );
+            $this->openNgcTypeCache = [];
+            return $this->openNgcTypeCache;
+        }
     }
 
     /**
@@ -1099,11 +1255,23 @@ final class AstroapiPhocaSync extends CMSPlugin implements SubscriberInterface
             ?? $observation['target_name']
             ?? ''
         ));
+        $seestarMetadata = $this->extractSeestarStackMetadata($observation);
+        $classification = $this->classify($observation);
+        $rows = [];
+        $addRow = static function (string $label, string $value, bool $isHtml = false) use (&$rows): void {
+            if ($value === '') {
+                return;
+            }
+            $rows[] = [
+                'label' => $label,
+                'value' => $value,
+                'is_html' => $isHtml,
+            ];
+        };
         $details = [
             '<p><strong>AstroAPI observation</strong><br>' .
             htmlspecialchars((string) $observation['observation_key'], ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') .
             '</p>',
-            '<p>',
         ];
 
         foreach (
@@ -1117,28 +1285,86 @@ final class AstroapiPhocaSync extends CMSPlugin implements SubscriberInterface
             ] as $label => $field
         ) {
             if ($observation[$field] ?? null) {
-                $details[] = '<strong>' . htmlspecialchars($label, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') .
-                    ':</strong> ' .
-                    htmlspecialchars((string) $observation[$field], ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') .
-                    '<br>';
+                $addRow($label, (string) $observation[$field]);
             }
+        }
+
+        $classificationLabels = $this->formatClassificationLabels($classification['tags'] ?? []);
+        if ($classificationLabels !== '') {
+            $addRow('Classification', $classificationLabels);
         }
 
         if ($identifier !== '') {
             $url = $this->simbadUrl($identifier);
-            $details[] = '<strong>Catalogue:</strong> ' .
-                '<a href="' . htmlspecialchars($url, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') .
-                '" target="_blank" rel="noopener noreferrer">In SIMBAD öffnen</a><br>';
+            $addRow('Catalogue', '<a href="' . htmlspecialchars($url, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') .
+                '" target="_blank" rel="noopener noreferrer">In SIMBAD öffnen</a>', true);
         }
 
-        $details[] = '</p>';
+        if ($seestarMetadata !== []) {
+            $addRow('Stack creator', trim((string) ($seestarMetadata['creator'] ?? '')));
+            $addRow('Stack target', trim((string) ($seestarMetadata['obj_name'] ?? '')));
+            if (isset($seestarMetadata['stack_num'])) {
+                $addRow('Stacked frames', (string) (int) $seestarMetadata['stack_num']);
+            }
+            if (isset($seestarMetadata['exp_sec'])) {
+                $addRow('Sub exposure', (string) $seestarMetadata['exp_sec'] . ' s');
+            }
+            if (isset($seestarMetadata['tot_exp_sec'])) {
+                $addRow('Total integration', $this->formatExposureDuration((float) $seestarMetadata['tot_exp_sec']));
+            }
+            if (
+                isset($seestarMetadata['size'])
+                && is_array($seestarMetadata['size'])
+                && count($seestarMetadata['size']) === 2
+            ) {
+                $addRow(
+                    'Frame size',
+                    (int) $seestarMetadata['size'][0] . ' × ' . (int) $seestarMetadata['size'][1] . ' px'
+                );
+            }
+            $addRow('Bayer pattern', trim((string) ($seestarMetadata['bayer_pat'] ?? '')));
+            if (isset($seestarMetadata['lp_position'])) {
+                $addRow('LP position', (string) (int) $seestarMetadata['lp_position']);
+            }
+            if (isset($seestarMetadata['mosaic']) && is_array($seestarMetadata['mosaic'])) {
+                $mosaic = $seestarMetadata['mosaic'];
+                if (isset($mosaic['angle'])) {
+                    $addRow('Mosaic angle', (string) $mosaic['angle'] . '°');
+                }
+                if (isset($mosaic['scale'])) {
+                    $addRow('Mosaic scale', (string) $mosaic['scale']);
+                }
+                if (isset($mosaic['star_map_angle'])) {
+                    $addRow('Sky angle', (string) $mosaic['star_map_angle'] . '°');
+                }
+            }
+            if (array_key_exists('is_solved', $seestarMetadata)) {
+                $addRow('Plate solved', $seestarMetadata['is_solved'] ? 'yes' : 'no');
+            }
+        }
+
+        if ($rows !== []) {
+            $details[] = '<div class="astro-observation-meta-grid">';
+            foreach ($rows as $row) {
+                $details[] = '<div class="astro-observation-meta-item"><span class="astro-observation-meta-label">' .
+                    htmlspecialchars((string) $row['label'], ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') .
+                    '</span><span class="astro-observation-meta-value">' .
+                    (
+                        ($row['is_html'] ?? false)
+                            ? (string) $row['value']
+                            : htmlspecialchars((string) $row['value'], ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8')
+                    ) .
+                    '</span></div>';
+            }
+            $details[] = '</div>';
+        }
 
         $files = array_values(array_filter(
             is_array($observation['files'] ?? null) ? $observation['files'] : [],
             static fn (mixed $file): bool => is_array($file) && !empty($file['file_name'])
         ));
         if ($files !== []) {
-            $details[] = '<p><strong>Files (' . count($files) . ')</strong></p><ul>';
+            $details[] = '<p><strong>Files (' . count($files) . ')</strong></p><ul class="astro-observation-files">';
             foreach ($files as $file) {
                 $type = trim((string) ($file['file_type'] ?? 'FILE'));
                 $name = trim((string) $file['file_name']);
@@ -1183,6 +1409,183 @@ final class AstroapiPhocaSync extends CMSPlugin implements SubscriberInterface
         }
 
         return implode('', $details);
+    }
+
+    /**
+     * @param array<string, mixed> $observation
+     * @return array<string, mixed>
+     */
+    private function extractSeestarStackMetadata(array $observation): array
+    {
+        $files = is_array($observation['files'] ?? null) ? $observation['files'] : [];
+        if ($files === []) {
+            return [];
+        }
+
+        $mediaLinks = is_array($observation['media_links'] ?? null)
+            ? $observation['media_links']
+            : [];
+        $primaryCandidates = [];
+        $fallbackCandidates = [];
+
+        foreach ($files as $file) {
+            if (!is_array($file)) {
+                continue;
+            }
+
+            $type = strtoupper(trim((string) ($file['file_type'] ?? '')));
+            if ($type !== 'STACK') {
+                continue;
+            }
+
+            $name = trim((string) ($file['file_name'] ?? ''));
+            $lowerName = strtolower($name);
+            if (
+                !str_ends_with($lowerName, '.jpg')
+                && !str_ends_with($lowerName, '.jpeg')
+                && !str_ends_with($lowerName, '.png')
+                && !str_ends_with($lowerName, '.webp')
+            ) {
+                continue;
+            }
+
+            $fileId = (int) ($file['id'] ?? 0);
+            $relative = $fileId > 0 ? ($mediaLinks[$fileId] ?? null) : null;
+            if (!is_string($relative) || $relative === '') {
+                continue;
+            }
+
+            $absolutePath = JPATH_ROOT . '/images/phocagallery/' . ltrim($relative, '/');
+            if (!is_file($absolutePath)) {
+                continue;
+            }
+
+            if (str_contains($lowerName, '_astroai.') || str_contains($lowerName, '_thn.')) {
+                $fallbackCandidates[] = $absolutePath;
+                continue;
+            }
+
+            $primaryCandidates[] = $absolutePath;
+        }
+
+        $candidates = array_values(array_unique([...$primaryCandidates, ...$fallbackCandidates]));
+        foreach ($candidates as $candidate) {
+            $metadata = $this->extractEmbeddedJsonMetadata($candidate);
+            if ($metadata !== []) {
+                return $metadata;
+            }
+        }
+
+        return [];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function extractEmbeddedJsonMetadata(string $absolutePath): array
+    {
+        $binary = @file_get_contents($absolutePath);
+        if (!is_string($binary) || $binary === '') {
+            return [];
+        }
+
+        $start = strpos($binary, '{"result":');
+        if ($start === false) {
+            return [];
+        }
+
+        $depth = 0;
+        $inString = false;
+        $escaped = false;
+        $end = null;
+        $length = strlen($binary);
+
+        for ($i = $start; $i < $length; $i++) {
+            $char = $binary[$i];
+            if ($inString) {
+                if ($escaped) {
+                    $escaped = false;
+                    continue;
+                }
+                if ($char === '\\') {
+                    $escaped = true;
+                    continue;
+                }
+                if ($char === '"') {
+                    $inString = false;
+                }
+                continue;
+            }
+
+            if ($char === '"') {
+                $inString = true;
+                continue;
+            }
+            if ($char === '{') {
+                $depth++;
+                continue;
+            }
+            if ($char === '}') {
+                $depth--;
+                if ($depth === 0) {
+                    $end = $i;
+                    break;
+                }
+            }
+        }
+
+        if ($end === null || $end <= $start) {
+            return [];
+        }
+
+        $json = substr($binary, $start, ($end - $start) + 1);
+        $decoded = json_decode($json, true);
+        if (!is_array($decoded) || !is_array($decoded['result'] ?? null)) {
+            return [];
+        }
+
+        $result = $decoded['result'];
+        if (!array_key_exists('stack_num', $result) && !array_key_exists('tot_exp_sec', $result)) {
+            return [];
+        }
+
+        return $result;
+    }
+
+    private function formatExposureDuration(float $seconds): string
+    {
+        if ($seconds <= 0) {
+            return '00:00:00';
+        }
+
+        $totalSeconds = (int) round($seconds);
+        $hours = intdiv($totalSeconds, 3600);
+        $minutes = intdiv($totalSeconds % 3600, 60);
+        $remainingSeconds = $totalSeconds % 60;
+
+        return sprintf('%02d:%02d:%02d', $hours, $minutes, $remainingSeconds);
+    }
+
+    /**
+     * @param list<string> $tags
+     */
+    private function formatClassificationLabels(array $tags): string
+    {
+        $labels = [];
+        foreach ($tags as $tag) {
+            $value = trim((string) $tag);
+            if (
+                $value === ''
+                || $value === 'Processed'
+                || str_starts_with($value, 'Year_')
+                || str_starts_with($value, 'Project_')
+            ) {
+                continue;
+            }
+            $labels[] = str_replace('_', ' ', $value);
+        }
+
+        return implode(', ', array_values(array_unique($labels)));
     }
 
     /**

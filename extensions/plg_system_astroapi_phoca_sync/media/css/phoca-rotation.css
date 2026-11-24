@@ -70,8 +70,17 @@ form:has(.form-select) .form-select option {
   background: #080808;
 }
 
+.astro-tile-classification-hidden {
+  display: none !important;
+}
+
+#phocagallery .pg-item-box .pg-item-box-tags {
+  display: none !important;
+}
+
 .pswp__button--astro-rotate-left,
-.pswp__button--astro-rotate-right {
+.pswp__button--astro-rotate-right,
+.pswp__button--astro-caption-toggle {
   background: rgba(0, 0, 0, 0.35);
   color: #fff;
   font-family: Arial, sans-serif;
@@ -86,6 +95,15 @@ form:has(.form-select) .form-select option {
 
 .pswp__button--astro-rotate-right::before {
   content: "↷";
+}
+
+.pswp__button--astro-caption-toggle::before {
+  content: "ⓘ";
+  font-size: 21px;
+}
+
+.pswp__button--astro-caption-toggle[aria-pressed="true"] {
+  background: rgba(37, 99, 235, 0.55);
 }
 
 .pswp__img[data-astro-rotation] {
@@ -175,12 +193,12 @@ form:has(.form-select) .form-select option {
   bottom: 18px;
   left: 50%;
   max-height: min(38vh, 420px);
-  max-width: min(900px, calc(100vw - 120px));
+  max-width: min(1220px, calc(100vw - 80px));
   overflow: auto;
   pointer-events: auto;
   top: auto;
   transform: translateX(-50%);
-  width: max-content;
+  width: min(1220px, calc(100vw - 80px));
   z-index: 20;
 }
 
@@ -209,6 +227,42 @@ form:has(.form-select) .form-select option {
   text-decoration: underline;
 }
 
+.astro-observation-meta-grid {
+  column-gap: 18px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(200px, 1fr));
+  margin: 0 0 10px;
+  row-gap: 8px;
+}
+
+.astro-observation-meta-item {
+  min-width: 0;
+}
+
+.astro-observation-meta-label {
+  color: #cbd5e1;
+  display: block;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.astro-observation-meta-value {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.astro-observation-files {
+  column-count: 2;
+  column-gap: 16px;
+}
+
+.astro-observation-files li {
+  break-inside: avoid;
+  margin-bottom: 2px;
+}
+
 .astro-observation-video {
   background: #000;
   border: 1px solid rgba(255, 255, 255, 0.25);
@@ -224,6 +278,20 @@ form:has(.form-select) .form-select option {
   display: none !important;
 }
 
+.pswp.astro-caption-hidden .pswp__caption {
+  display: none !important;
+}
+
+@media (min-width: 1260px) {
+  .astro-observation-meta-grid {
+    grid-template-columns: repeat(4, minmax(180px, 1fr));
+  }
+
+  .astro-observation-files {
+    column-count: 3;
+  }
+}
+
 @media (max-width: 767px) {
   .pswp__caption {
     bottom: 10px;
@@ -232,6 +300,14 @@ form:has(.form-select) .form-select option {
     max-width: calc(100vw - 24px);
     top: auto;
     transform: none;
+  }
+
+  .astro-observation-meta-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .astro-observation-files {
+    column-count: 1;
   }
 }
 
