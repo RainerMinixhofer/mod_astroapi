@@ -20,6 +20,50 @@
     unknown: 'Status unbekannt',
   };
 
+  const csrfTokenName = () => {
+    const tokenFromOptions = window.Joomla?.getOptions?.('csrf.token');
+    if (typeof tokenFromOptions === 'string' && tokenFromOptions.length > 0) {
+      return tokenFromOptions;
+    }
+
+    const scriptOptions = document.querySelector('script.joomla-script-options');
+    const raw = scriptOptions?.textContent || '';
+    const match = raw.match(/"csrf\.token":"([a-zA-Z0-9]+)"/);
+    return match?.[1] || null;
+  };
+
+  const prepareSetMainForm = (form) => {
+    if (!(form instanceof HTMLFormElement) || !form.classList.contains('astro-set-main-form')) {
+      return;
+    }
+
+    const currentPath = window.location.pathname + window.location.search + window.location.hash;
+    const returnInput = form.querySelector('input[name="return"]');
+    if (returnInput instanceof HTMLInputElement) {
+      returnInput.value = btoa(currentPath);
+    }
+
+    const token = csrfTokenName();
+    if (!token) {
+      return;
+    }
+
+    form.querySelectorAll('input[type="hidden"]').forEach((input) => {
+      if (input.name !== token && /^[a-zA-Z0-9]{20,}$/.test(input.name)) {
+        input.remove();
+      }
+    });
+
+    let tokenInput = form.querySelector(`input[name="${token}"]`);
+    if (!(tokenInput instanceof HTMLInputElement)) {
+      tokenInput = document.createElement('input');
+      tokenInput.type = 'hidden';
+      tokenInput.name = token;
+      form.appendChild(tokenInput);
+    }
+    tokenInput.value = '1';
+  };
+
   const categoryIdFromUrl = (value) => {
     try {
       const url = new URL(value, window.location.href);
@@ -343,6 +387,7 @@
     decorateGallery();
     installControls();
     updateCaptionToggleButton();
+    document.querySelectorAll('form.astro-set-main-form').forEach((form) => prepareSetMainForm(form));
   });
 
   observer.observe(document.documentElement, {
@@ -367,9 +412,77 @@
     }
   }, true);
 
+  document.addEventListener('submit', (event) => {
+    const form = event.target;
+    if (!(form instanceof HTMLFormElement) || !form.classList.contains('astro-set-main-form')) {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    prepareSetMainForm(form);
+
+    const button = form.querySelector('button[type="submit"]');
+    if (button instanceof HTMLButtonElement) {
+      button.disabled = true;
+      button.textContent = 'Setting...';
+    }
+
+    fetch(form.action, {
+      method: 'POST',
+      credentials: 'same-origin',
+      cache: 'no-store',
+      headers: { 'X-Requested-With': 'XMLHttpRequest', 'Accept': 'application/json' },
+      body: new FormData(form),
+    })
+      .then(async (response) => {
+        let result;
+        try {
+          result = await response.json();
+        } catch {
+          throw new Error(`Main image request failed (${response.status})`);
+        }
+        if (!response.ok || !result.success) {
+          throw new Error(result.message || `Main image request failed (${response.status})`);
+        }
+        return result;
+      })
+      .then((result) => {
+        const relative = String(result.relative || form.dataset.relative || '');
+        if (relative) {
+          const url = `/images/phocagallery/${relative.replace(/^\/+/, '')}?v=${Date.now()}`;
+          document.querySelectorAll('.pswp__img').forEach((image) => {
+            if (image instanceof HTMLImageElement) {
+              image.src = url;
+              image.removeAttribute('srcset');
+            }
+          });
+        }
+
+        const listItem = form.closest('li');
+        form.remove();
+        if (listItem) {
+          listItem.parentElement?.querySelectorAll('.astro-main-image-pill').forEach((oldMain) => oldMain.remove());
+          const pill = document.createElement('span');
+          pill.className = 'astro-main-image-pill';
+          pill.textContent = 'main';
+          listItem.appendChild(pill);
+        }
+
+        window.dispatchEvent(new CustomEvent('astroapi-main-image-updated', { detail: result }));
+      })
+      .catch((error) => {
+        window.alert(error.message);
+        if (button instanceof HTMLButtonElement) {
+          button.disabled = false;
+          button.textContent = 'Set as main';
+        }
+      });
+  }, true);
+
   window.addEventListener('resize', refitActiveImage);
   preserveFullscreenNavigation();
   decorateGallery();
+  document.querySelectorAll('form.astro-set-main-form').forEach((form) => prepareSetMainForm(form));
   updateImportStatus();
   window.setInterval(updateImportStatus, 5000);
 })();

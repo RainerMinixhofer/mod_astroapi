@@ -9,6 +9,7 @@ use Joomla\CMS\Event\Application\AfterDispatchEvent;
 use Joomla\CMS\Http\HttpFactory;
 use Joomla\CMS\Log\Log;
 use Joomla\CMS\Plugin\CMSPlugin;
+use Joomla\CMS\Session\Session;
 use Joomla\Database\DatabaseAwareTrait;
 use Joomla\Event\SubscriberInterface;
 use Joomla\CMS\Uri\Uri;
@@ -172,6 +173,13 @@ final class AstroapiPhocaSync extends CMSPlugin implements SubscriberInterface
     public function onAfterInitialise(AfterInitialiseEvent $event): void
     {
         $application = $this->getApplication();
+        $input = $application->getInput();
+
+        if ($input->getInt('astroapi_set_main_image') === 1) {
+            $this->handleSetMainImageRequest($application);
+            return;
+        }
+
         if ($application->getInput()->getInt('astroapi_status') === 1) {
             try {
                 $status = $this->getJson('/import-status');
@@ -188,6 +196,7 @@ final class AstroapiPhocaSync extends CMSPlugin implements SubscriberInterface
                         $new++;
                     }
                 }
+
                 $status['new_observations'] = $new;
                 $status['existing_observations'] = $existing;
                 $statusCode = 200;
@@ -269,6 +278,87 @@ final class AstroapiPhocaSync extends CMSPlugin implements SubscriberInterface
         }
     }
 
+    private function handleSetMainImageRequest(object $application): void
+    {
+        $input = $application->getInput();
+        $isAjax = $input->getInt('ajax') === 1
+            || strcasecmp((string) ($_SERVER['HTTP_X_REQUESTED_WITH'] ?? ''), 'XMLHttpRequest') === 0;
+        $referer = (string) ($_SERVER['HTTP_REFERER'] ?? '');
+        $fallback = Uri::isInternal($referer) ? $referer : '/';
+        $return = (string) base64_decode((string) $input->getString('return', ''), true);
+        $redirect = Uri::isInternal($return) ? $return : $fallback;
+        $observationId = $input->getInt('observation_id');
+        $fileId = $input->getInt('file_id');
+        if ($observationId <= 0 && $fileId > 0) {
+            $observationId = $this->observationIdByFileId($fileId);
+        }
+
+        if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'POST' || !Session::checkToken('post')) {
+            if ($isAjax) {
+                $application->setHeader('Content-Type', 'application/json; charset=utf-8', true);
+                echo json_encode(['success' => false, 'message' => 'Invalid request token for main image switch.'], JSON_UNESCAPED_SLASHES);
+                $application->close();
+            }
+            $application->enqueueMessage('Invalid request token for main image switch.', 'error');
+            $application->redirect($redirect);
+            $application->close();
+        }
+
+        if ($observationId <= 0) {
+            if ($isAjax) {
+                $application->setHeader('Content-Type', 'application/json; charset=utf-8', true);
+                echo json_encode(['success' => false, 'message' => 'Invalid observation in main image request.'], JSON_UNESCAPED_SLASHES);
+                $application->close();
+            }
+            $application->enqueueMessage('Invalid observation in main image request.', 'error');
+            $application->redirect($redirect);
+            $application->close();
+        }
+
+        try {
+            $this->setMainObservationImage($observationId, $fileId);
+            $imageRelative = ltrim(
+                (string) ($this->existingMediaLinks($this->imageId($observationId))[$fileId] ?? ''),
+                '/'
+            );
+            if ($isAjax) {
+                $application->setHeader('Content-Type', 'application/json; charset=utf-8', true);
+                echo json_encode(
+                    [
+                        'success' => true,
+                        'message' => 'Main observation image updated.',
+                        'relative' => $imageRelative,
+                    ],
+                    JSON_UNESCAPED_SLASHES
+                );
+                $application->close();
+            }
+            $application->enqueueMessage('Main observation image updated.', 'success');
+            $application->redirect($redirect);
+            $application->close();
+        } catch (\Throwable $exception) {
+            Log::add(
+                'Failed to switch main observation image: ' . $exception->getMessage(),
+                Log::ERROR,
+                'astroapi.phoca'
+            );
+            if ($isAjax) {
+                $application->setHeader('Content-Type', 'application/json; charset=utf-8', true);
+                echo json_encode(
+                    ['success' => false, 'message' => 'Failed to switch main observation image: ' . $exception->getMessage()],
+                    JSON_UNESCAPED_SLASHES
+                );
+                $application->close();
+            }
+            $application->enqueueMessage(
+                'Failed to switch main observation image: ' . $exception->getMessage(),
+                'error'
+            );
+            $application->redirect($redirect);
+            $application->close();
+        }
+    }
+
     /**
      * @return array{created: int, updated: int, skipped: int}
      */
@@ -336,7 +426,9 @@ final class AstroapiPhocaSync extends CMSPlugin implements SubscriberInterface
                 throw $exception;
             }
 
-            $this->createPhocaThumbnails($filename);
+            if (!$includeUploaded || $existingId <= 0) {
+                $this->createPhocaThumbnails($filename);
+            }
             if (!$includeUploaded) {
                 $this->confirmPhocaUpload((int) $observation['id']);
             }
@@ -425,6 +517,21 @@ final class AstroapiPhocaSync extends CMSPlugin implements SubscriberInterface
             $tags[] = 'DSLR_Camera';
         }
 
+        $isSeestarS50 = str_contains($observationText, 's50')
+            || str_contains($observationText, 'seestar');
+        $isLunar = preg_match('/\b(?:moon|lunar|mond)\b/', $observationText) === 1;
+        if ($isSeestarS50 && $isLunar) {
+            return [
+                'category' => ['Solar System', 'Moon', 'Full Moon'],
+                'tags' => array_values(array_unique([
+                    ...$tags,
+                    'Solar_System',
+                    'Lunar',
+                    'Moon_Full_Moon',
+                ])),
+            ];
+        }
+
         $manualCategory = $this->explicitCategory($observation['phoca_category'] ?? null);
         if ($manualCategory !== null) {
             $tags[] = 'Classification_Manual';
@@ -441,6 +548,18 @@ final class AstroapiPhocaSync extends CMSPlugin implements SubscriberInterface
             return [
                 'category' => ['Astronomy Society (StAV)', 'Member Observations', $year ?? 'Archive'],
                 'tags' => array_values(array_unique($tags)),
+            ];
+        }
+
+        if (preg_match('/\b(?:moon|lunar|mond)\b/', $observationText) === 1) {
+            return [
+                'category' => ['Solar System', 'Moon', 'Full Moon'],
+                'tags' => array_values(array_unique([
+                    ...$tags,
+                    'Solar_System',
+                    'Lunar',
+                    'Moon_Full_Moon',
+                ])),
             ];
         }
 
@@ -1249,6 +1368,129 @@ final class AstroapiPhocaSync extends CMSPlugin implements SubscriberInterface
         return $filename;
     }
 
+    private function observationIdByFileId(int $fileId): int
+    {
+        $database = $this->getDatabase();
+        $query = $database->createQuery()
+            ->select([$database->quoteName('params')])
+            ->from($database->quoteName('#__phocagallery'))
+            ->where($database->quoteName('params') . ' LIKE ' . $database->quote('%"' . $fileId . '":%'));
+        $database->setQuery($query);
+
+        foreach ($database->loadColumn() as $paramsJson) {
+            $params = json_decode((string) $paramsJson, true);
+            $observationId = (int) ($params['observation_id'] ?? 0);
+            $mediaLinks = is_array($params['media_links'] ?? null) ? $params['media_links'] : [];
+            if ($observationId > 0 && array_key_exists((string) $fileId, $mediaLinks)) {
+                return $observationId;
+            }
+        }
+
+        return 0;
+    }
+
+    private function imageCategoryId(int $imageId): int
+    {
+        $database = $this->getDatabase();
+        $query = $database->createQuery()
+            ->select($database->quoteName('catid'))
+            ->from($database->quoteName('#__phocagallery'))
+            ->where($database->quoteName('id') . ' = ' . (int) $imageId);
+        $database->setQuery($query);
+
+        return (int) $database->loadResult();
+    }
+
+    private function canSetMainObservationImage(object $user, int $observationId): bool
+    {
+        if ($user->guest || $observationId <= 0) {
+            return false;
+        }
+
+        $componentAsset = 'com_phocagallery';
+        foreach (['core.admin', 'core.edit', 'core.edit.state', 'core.create'] as $permission) {
+            if ($user->authorise($permission, $componentAsset)) {
+                return true;
+            }
+        }
+
+        $imageId = $this->imageId($observationId);
+        if ($imageId <= 0) {
+            return false;
+        }
+
+        $imageAsset = 'com_phocagallery.image.' . $imageId;
+        foreach (['core.admin', 'core.edit', 'core.edit.state'] as $permission) {
+            if ($user->authorise($permission, $imageAsset)) {
+                return true;
+            }
+        }
+
+        $categoryId = $this->imageCategoryId($imageId);
+        if ($categoryId <= 0) {
+            return false;
+        }
+
+        $categoryAsset = 'com_phocagallery.category.' . $categoryId;
+        foreach (['core.admin', 'core.edit', 'core.edit.state', 'core.create'] as $permission) {
+            if ($user->authorise($permission, $categoryAsset)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private function setMainObservationImage(int $observationId, int $fileId): void
+    {
+        if ($observationId <= 0 || $fileId <= 0) {
+            throw new \RuntimeException('Invalid observation or file selection.');
+        }
+
+        $imageId = $this->imageId($observationId);
+        if ($imageId <= 0) {
+            throw new \RuntimeException('No Phoca image found for observation ' . $observationId . '.');
+        }
+
+        $mediaLinks = $this->existingMediaLinks($imageId);
+        $relative = ltrim((string) ($mediaLinks[$fileId] ?? ''), '/');
+        if ($relative === '') {
+            throw new \RuntimeException('Selected file is not available in archived media links.');
+        }
+
+        if (preg_match('/\.(?:jpe?g|png|webp|avif|gif)$/i', $relative) !== 1) {
+            throw new \RuntimeException('Selected file is not a supported image.');
+        }
+
+        $observation = $this->getJson('/observation/' . $observationId);
+        $files = is_array($observation['files'] ?? null) ? $observation['files'] : [];
+        $selected = null;
+        foreach ($files as $file) {
+            if (is_array($file) && (int) ($file['id'] ?? 0) === $fileId) {
+                $selected = $file;
+                break;
+            }
+        }
+
+        $selectedType = strtoupper(trim((string) ($selected['file_type'] ?? '')));
+        if (!in_array($selectedType, ['STACK', 'AI'], true)) {
+            throw new \RuntimeException('Only STACK or AI images can be selected as main image.');
+        }
+
+        $absolute = JPATH_ROOT . '/images/phocagallery/' . $relative;
+        if (!is_file($absolute)) {
+            throw new \RuntimeException('Selected image file is missing in Joomla archive.');
+        }
+
+        $database = $this->getDatabase();
+        $record = (object) [
+            'id' => $imageId,
+            'filename' => $relative,
+        ];
+        $database->updateObject('#__phocagallery', $record, 'id');
+        $this->createPhocaThumbnails($relative);
+    }
+
     /**
      * @param list<int> $tagIds
      */
@@ -1409,20 +1651,52 @@ final class AstroapiPhocaSync extends CMSPlugin implements SubscriberInterface
             $details[] = '</div>';
         }
 
+        $imageId = $this->imageId((int) ($observation['id'] ?? 0));
+        $currentMainRelative = null;
+        if ($imageId > 0) {
+            try {
+                $currentMainRelative = ltrim($this->imageFilename($imageId), '/');
+            } catch (\Throwable) {
+                $currentMainRelative = null;
+            }
+        }
+
         $files = array_values(array_filter(
             is_array($observation['files'] ?? null) ? $observation['files'] : [],
             static fn (mixed $file): bool => is_array($file) && !empty($file['file_name'])
         ));
         if ($files !== []) {
+            $mediaLinks = is_array($observation['media_links'] ?? null)
+                ? $observation['media_links']
+                : [];
+            $mainCandidateCount = 0;
+            foreach ($files as $file) {
+                if (!is_array($file)) {
+                    continue;
+                }
+                $fileId = (int) ($file['id'] ?? 0);
+                $type = strtoupper(trim((string) ($file['file_type'] ?? '')));
+                if (
+                    in_array($type, ['STACK', 'AI'], true)
+                    && $fileId > 0
+                    && is_string($mediaLinks[$fileId] ?? null)
+                ) {
+                    $mainCandidateCount++;
+                }
+            }
+            $hasMultipleMainImageOptions = $mainCandidateCount > 1;
+
             $details[] = '<p><strong>Files (' . count($files) . ')</strong></p><ul class="astro-observation-files">';
             foreach ($files as $file) {
                 $type = trim((string) ($file['file_type'] ?? 'FILE'));
                 $name = trim((string) $file['file_name']);
                 $fileId = (int) ($file['id'] ?? 0);
-                $mediaLinks = is_array($observation['media_links'] ?? null)
-                    ? $observation['media_links']
-                    : [];
                 $relative = $mediaLinks[$fileId] ?? null;
+                $relativePath = is_string($relative) ? ltrim($relative, '/') : '';
+                $isCurrentMain = $currentMainRelative !== null
+                    && strtolower($currentMainRelative) === strtolower($relativePath);
+                $fileTypeUpper = strtoupper($type);
+                $isMainCandidate = in_array($fileTypeUpper, ['STACK', 'AI'], true);
                 $details[] = '<li><strong>' .
                     htmlspecialchars($type !== '' ? $type : 'FILE', ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') .
                     ':</strong> ' .
@@ -1439,6 +1713,30 @@ final class AstroapiPhocaSync extends CMSPlugin implements SubscriberInterface
                                 'UTF-8'
                             ) . '</a>'
                         : htmlspecialchars($name, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8')
+                    ) .
+                    (
+                        ($isMainCandidate && $hasMultipleMainImageOptions)
+                            ? (
+                                $isCurrentMain
+                                    ? ' <span class="astro-main-image-pill">main</span>'
+                                    : (
+                                        '<form class="astro-set-main-form" method="post" action="' .
+                                        htmlspecialchars('/index.php?option=com_phocagallery', ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') .
+                                        '" data-relative="' .
+                                        htmlspecialchars($relativePath, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') .
+                                        '">' .
+                                        '<input type="hidden" name="ajax" value="1">' .
+                                        '<input type="hidden" name="astroapi_set_main_image" value="1">' .
+                                        '<input type="hidden" name="observation_id" value="' .
+                                        (int) ($observation['id'] ?? 0) .
+                                        '">' .
+                                        '<input type="hidden" name="file_id" value="' . $fileId . '">' .
+                                        '<input type="hidden" name="return" value="">' .
+                                        '<button type="submit" class="astro-set-main-button">Set as main</button>' .
+                                        '</form>'
+                                    )
+                            )
+                            : ''
                     ) .
                     '</li>';
             }

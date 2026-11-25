@@ -263,6 +263,40 @@ form:has(.form-select) .form-select option {
   margin-bottom: 2px;
 }
 
+.astro-main-image-pill {
+  background: rgba(34, 197, 94, 0.2);
+  border: 1px solid rgba(34, 197, 94, 0.6);
+  border-radius: 999px;
+  color: #bbf7d0;
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 700;
+  margin-left: 6px;
+  padding: 1px 8px;
+  text-transform: uppercase;
+}
+
+.astro-set-main-form {
+  display: inline-block;
+  margin: 0 0 0 6px;
+}
+
+.astro-set-main-button {
+  background: rgba(37, 99, 235, 0.25);
+  border: 1px solid rgba(147, 197, 253, 0.5);
+  border-radius: 4px;
+  color: #dbeafe;
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1.2;
+  padding: 2px 8px;
+}
+
+.astro-set-main-button:hover,
+.astro-set-main-button:focus {
+  background: rgba(37, 99, 235, 0.45);
+}
+
 .astro-observation-video {
   background: #000;
   border: 1px solid rgba(255, 255, 255, 0.25);

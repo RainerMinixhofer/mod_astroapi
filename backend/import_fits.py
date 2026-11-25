@@ -714,7 +714,18 @@ for group_key, files in groups.items():
             or is_coarse_classification(metadata["target_type"])
         )
     ):
-        resolved_type = resolve_catalog_classification(metadata["target_name"])
+        equipment_text = " ".join(
+            str(metadata.get(field) or "")
+            for field in ("telescope", "camera", "instrument", "source")
+        ).lower()
+        target_text = str(metadata.get("target_name") or "").lower()
+        if (
+            ("s50" in equipment_text or "seestar" in equipment_text)
+            and any(word in target_text for word in ("moon", "lunar", "mond"))
+        ):
+            resolved_type = "Full Moon"
+        else:
+            resolved_type = resolve_catalog_classification(metadata["target_name"])
         if resolved_type:
             metadata["target_type"] = resolved_type
 
